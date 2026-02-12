@@ -21,30 +21,30 @@ module FastBloomFilter
       items.each { |item| add(item.to_s) }
       self
     end
-    
+
     def count_possible_matches(items)
       items.count { |item| include?(item.to_s) }
     end
-    
+
     def inspect
       s = stats
-      size_kb = (s[:size_bytes] / 1024.0).round(2)
+      total_kb = (s[:total_bytes] / 1024.0).round(2)
       fill_pct = (s[:fill_ratio] * 100).round(2)
-      
-      "#<FastBloomFilter::Filter capacity=#{s[:capacity]} " \
-      "size=#{size_kb}KB hashes=#{s[:num_hashes]} fill=#{fill_pct}%>"
+
+      "#<FastBloomFilter::Filter v2 layers=#{s[:num_layers]} " \
+      "count=#{s[:total_count]} size=#{total_kb}KB fill=#{fill_pct}%>"
     end
-    
+
     def to_s
       inspect
     end
   end
-  
-  def self.for_emails(capacity, error_rate: 0.001)
-    Filter.new(capacity, error_rate)
+
+  def self.for_emails(error_rate: 0.001, initial_capacity: 10_000)
+    Filter.new(error_rate: error_rate, initial_capacity: initial_capacity)
   end
-  
-  def self.for_urls(capacity, error_rate: 0.01)
-    Filter.new(capacity, error_rate)
+
+  def self.for_urls(error_rate: 0.01, initial_capacity: 10_000)
+    Filter.new(error_rate: error_rate, initial_capacity: initial_capacity)
   end
 end
