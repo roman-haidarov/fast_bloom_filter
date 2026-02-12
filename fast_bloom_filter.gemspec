@@ -6,8 +6,8 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Roman Haydarov"]
   spec.email         = ["romnhajdarov@gmail.com"]
 
-  spec.summary       = "High-performance Bloom Filter in C for Ruby"
-  spec.description   = "Memory-efficient probabilistic data structure. 20-50x less memory than Set, perfect for Rails apps."
+  spec.summary       = "Scalable Bloom Filter in C for Ruby - grows automatically"
+  spec.description   = "Memory-efficient scalable Bloom Filter that grows dynamically. No upfront capacity needed. 20-50x less memory than Set, perfect for Rails apps."
   spec.homepage      = "https://github.com/roman-haidarov/fast_bloom_filter"
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 2.7.0"

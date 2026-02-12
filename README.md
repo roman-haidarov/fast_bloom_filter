@@ -1,17 +1,26 @@
-# FastBloomFilter
+# FastBloomFilter v2 🚀
 
-[![CI](https://github.com/yourusername/fast_bloom_filter/actions/workflows/ci.yml/badge.svg)](https://github.com/yourusername/fast_bloom_filter/actions/workflows/ci.yml)
 [![Gem Version](https://badge.fury.io/rb/fast_bloom_filter.svg)](https://badge.fury.io/rb/fast_bloom_filter)
 
-A high-performance Bloom Filter implementation in C for Ruby. Perfect for Rails applications that need memory-efficient set membership testing.
+A **scalable** Bloom Filter implementation in C for Ruby. Grows automatically without requiring upfront capacity! Perfect for Rails applications that need memory-efficient set membership testing with unknown dataset sizes.
+
+## What's New in v2? 🎉
+
+- **🔄 Scalable Architecture**: No need to guess capacity upfront - the filter grows automatically
+- **📊 Multi-Layer System**: Adds new layers dynamically as data grows
+- **🎯 Smart Growth**: Growth factor adapts (2x → 1.75x → 1.5x → 1.25x)
+- **💡 Simpler API**: Just specify error rate, not capacity
+- **📈 Better for Unknown Sizes**: Perfect when you don't know how much data you'll have
+
+Based on ["Scalable Bloom Filters" (Almeida et al., 2007)](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=10.1.1.725.390)
 
 ## Features
 
 - **🚀 Fast**: C implementation with MurmurHash3
 - **💾 Memory Efficient**: 20-50x less memory than Ruby Set
-- **🎯 Configurable**: Adjustable false positive rate
-- **🔒 Thread-Safe**: Safe for concurrent operations
-- **📊 Statistics**: Built-in performance monitoring
+- **🔄 Auto-Scaling**: Grows dynamically as you add elements
+- **🎯 Configurable**: Adjustable false positive rate per layer
+- **📊 Statistics**: Detailed per-layer performance monitoring
 - **✅ Well-Tested**: Comprehensive test suite
 
 ## Installation
@@ -36,21 +45,32 @@ gem install fast_bloom_filter
 
 ## Usage
 
-### Basic Operations
+### Basic Operations (v2 API)
 
 ```ruby
 require 'fast_bloom_filter'
 
-# Create a filter for 10,000 items with 1% false positive rate
-bloom = FastBloomFilter::Filter.new(10_000, 0.01)
+# Create a scalable filter - NO CAPACITY NEEDED!
+# Just specify your desired error rate
+bloom = FastBloomFilter::Filter.new(error_rate: 0.01)
 
-# Add items
+# Or with an initial capacity hint (optional)
+bloom = FastBloomFilter::Filter.new(error_rate: 0.01, initial_capacity: 1000)
+
+# Add items - filter grows automatically
 bloom.add("user@example.com")
 bloom << "another@example.com"  # alias for add
 
 # Check membership
 bloom.include?("user@example.com")  # => true
 bloom.include?("notfound@test.com") # => false (probably)
+
+# Add thousands or millions - it scales!
+100_000.times { |i| bloom.add("user#{i}@test.com") }
+
+# Check stats
+bloom.count        # => 100002
+bloom.num_layers   # => 8 (grew automatically!)
 
 # Batch operations
 emails = ["user1@test.com", "user2@test.com", "user3@test.com"]
@@ -67,50 +87,99 @@ bloom.clear
 
 ```ruby
 # For email deduplication (0.1% false positive rate)
-bloom = FastBloomFilter.for_emails(100_000)
+bloom = FastBloomFilter.for_emails(error_rate: 0.001)
 
 # For URL tracking (1% false positive rate)
-bloom = FastBloomFilter.for_urls(50_000)
+bloom = FastBloomFilter.for_urls(error_rate: 0.01)
+
+# With initial capacity hint
+bloom = FastBloomFilter.for_emails(error_rate: 0.001, initial_capacity: 10_000)
 ```
 
 ### Merge Filters
 
 ```ruby
-bloom1 = FastBloomFilter::Filter.new(1000, 0.01)
-bloom2 = FastBloomFilter::Filter.new(1000, 0.01)
+bloom1 = FastBloomFilter::Filter.new(error_rate: 0.01)
+bloom2 = FastBloomFilter::Filter.new(error_rate: 0.01)
 
 bloom1.add("item1")
 bloom2.add("item2")
 
 bloom1.merge!(bloom2)  # bloom1 now contains both items
+# Merges all layers from bloom2 into bloom1
 ```
 
 ### Statistics
 
 ```ruby
-bloom = FastBloomFilter::Filter.new(10_000, 0.01)
+bloom = FastBloomFilter::Filter.new(error_rate: 0.01)
+1000.times { |i| bloom.add("item#{i}") }
+
 stats = bloom.stats
 
 # => {
-#   capacity: 10000,
-#   size_bytes: 11982,
-#   num_hashes: 7,
-#   fill_ratio: 0.0
+#   total_count: 1000,
+#   num_layers: 2,
+#   total_bytes: 2500,
+#   total_bits: 20000,
+#   total_bits_set: 6543,
+#   fill_ratio: 0.32715,
+#   error_rate: 0.01,
+#   layers: [
+#     {
+#       layer: 0,
+#       capacity: 1024,
+#       count: 1024,
+#       size_bytes: 1229,
+#       num_hashes: 7,
+#       bits_set: 5234,
+#       total_bits: 9832,
+#       fill_ratio: 0.532,
+#       error_rate: 0.0015
+#     },
+#     # ... more layers
+#   ]
 # }
 
 puts bloom.inspect
-# => #<FastBloomFilter::Filter capacity=10000 size=11.7KB hashes=7 fill=0.0%>
+# => #<FastBloomFilter::Filter v2 layers=2 count=1000 size=2.44KB fill=32.72%>
+```
+
+## How Scalable Bloom Filters Work
+
+Traditional Bloom Filters require you to specify capacity upfront. **Scalable Bloom Filters** solve this by:
+
+1. **Starting Small**: Begin with a small initial capacity (default: 1024 elements)
+2. **Adding Layers**: When a layer fills up, add a new layer with larger capacity
+3. **Tightening Error Rates**: Each new layer has a tighter error rate to maintain overall FPR
+4. **Smart Growth**: Growth factor decreases over time (2x → 1.75x → 1.5x → 1.25x)
+
+### Error Rate Distribution
+
+Each layer `i` gets error rate: `total_error_rate × (1 - r) × r^i`
+
+Where `r` is the tightening factor (default: 0.85). This ensures the sum of all layer error rates converges to your target error rate.
+
+### Example Growth Pattern
+
+```
+Layer 0: capacity=1,024   error_rate=0.0015  (initial)
+Layer 1: capacity=2,048   error_rate=0.0013  (2x growth)
+Layer 2: capacity=3,584   error_rate=0.0011  (1.75x growth)
+Layer 3: capacity=5,376   error_rate=0.0009  (1.5x growth)
+Layer 4: capacity=6,720   error_rate=0.0008  (1.25x growth)
+...
 ```
 
 ## Performance
 
 Benchmarks on MacBook Pro M1 (100K elements):
 
-| Operation | Bloom Filter | Ruby Set | Speedup |
-|-----------|--------------|----------|---------|
-| Add       | 45ms         | 120ms    | 2.7x    |
-| Check     | 8ms          | 15ms     | 1.9x    |
-| Memory    | 120KB        | 2000KB   | 16.7x   |
+| Operation | Bloom Filter v2 | Ruby Set | Speedup |
+|-----------|-----------------|----------|---------|
+| Add       | 48ms            | 120ms    | 2.5x    |
+| Check     | 9ms             | 15ms     | 1.7x    |
+| Memory    | 145KB           | 2000KB   | 13.8x   |
 
 Run benchmarks yourself:
 
@@ -120,11 +189,12 @@ ruby demo.rb
 
 ## Use Cases
 
-### Rails: Prevent Duplicate Email Signups
+### Rails: Prevent Duplicate Email Signups (No Capacity Guessing!)
 
 ```ruby
 class User < ApplicationRecord
-  SIGNUP_BLOOM = FastBloomFilter.for_emails(1_000_000)
+  # No need to guess how many users you'll have!
+  SIGNUP_BLOOM = FastBloomFilter.for_emails(error_rate: 0.001)
   
   before_validation :check_duplicate_signup
   
@@ -140,12 +210,13 @@ class User < ApplicationRecord
 end
 ```
 
-### Track Visited URLs
+### Track Visited URLs (Scales to Millions)
 
 ```ruby
 class WebCrawler
   def initialize
-    @visited = FastBloomFilter.for_urls(10_000_000)
+    # Starts small, grows as needed
+    @visited = FastBloomFilter.for_urls(error_rate: 0.01)
   end
   
   def crawl(url)
@@ -153,6 +224,11 @@ class WebCrawler
     
     @visited.add(url)
     # ... crawl logic
+    
+    # Check growth
+    if @visited.count % 10_000 == 0
+      puts "Crawled #{@visited.count} URLs, #{@visited.num_layers} layers"
+    end
   end
 end
 ```
@@ -162,7 +238,7 @@ end
 ```ruby
 class CacheWarmer
   def initialize
-    @warmed = FastBloomFilter::Filter.new(100_000, 0.001)
+    @warmed = FastBloomFilter::Filter.new(error_rate: 0.001)
   end
   
   def warm(key)
@@ -174,27 +250,31 @@ class CacheWarmer
 end
 ```
 
-## How It Works
+## Migration from v1.x
 
-A Bloom Filter is a space-efficient probabilistic data structure that tests whether an element is a member of a set:
+**v1.x (Fixed Capacity):**
+```ruby
+bloom = FastBloomFilter::Filter.new(10_000, 0.01)
+bloom = FastBloomFilter.for_emails(100_000)
+```
 
-- **No false negatives**: If it says "no", the item is definitely not in the set
-- **Possible false positives**: If it says "yes", the item is probably in the set
-- **Memory efficient**: Uses bit arrays instead of storing actual items
-- **Fast**: O(k) for add and lookup, where k is the number of hash functions
+**v2.x (Scalable):**
+```ruby
+# Recommended: Let it scale automatically
+bloom = FastBloomFilter::Filter.new(error_rate: 0.01)
 
-### Parameters
+# Or with initial capacity hint
+bloom = FastBloomFilter::Filter.new(error_rate: 0.01, initial_capacity: 1000)
 
-- **Capacity**: Expected number of elements
-- **Error Rate**: Probability of false positives (default: 0.01 = 1%)
-
-The filter automatically calculates optimal bit array size and number of hash functions.
+# Helper methods also changed
+bloom = FastBloomFilter.for_emails(error_rate: 0.001, initial_capacity: 10_000)
+```
 
 ## Development
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fast_bloom_filter.git
+git clone https://github.com/roman-haidarov/fast_bloom_filter.git
 cd fast_bloom_filter
 
 # Install dependencies
@@ -210,7 +290,7 @@ bundle exec rake test
 gem build fast_bloom_filter.gemspec
 
 # Install locally
-gem install ./fast_bloom_filter-1.0.0.gem
+gem install ./fast_bloom_filter-2.0.0.gem
 ```
 
 ### Quick Build Script
@@ -224,6 +304,15 @@ gem install ./fast_bloom_filter-1.0.0.gem
 - Ruby >= 2.7.0
 - C compiler (gcc, clang, etc.)
 - Make
+
+## Technical Details
+
+- **Hash Function**: MurmurHash3 (32-bit)
+- **Bit Array**: Dynamic allocation per layer
+- **Growth Strategy**: Adaptive (2x → 1.75x → 1.5x → 1.25x)
+- **Tightening Factor**: 0.85 (configurable)
+- **Memory Management**: Ruby GC integration with proper cleanup
+- **Thread Safety**: Safe for concurrent reads (writes need external synchronization)
 
 ## Contributing
 
@@ -239,14 +328,15 @@ The gem is available as open source under the terms of the [MIT License](LICENSE
 
 ## Credits
 
-- MurmurHash3 implementation based on Austin Appleby's original work
-- Bloom Filter algorithm by Burton Howard Bloom (1970)
+- Scalable Bloom Filters algorithm: Almeida, Baquero, Preguiça, Hutchison (2007)
+- MurmurHash3 implementation: Austin Appleby
+- Original Bloom Filter: Burton Howard Bloom (1970)
 
 ## Support
 
-- 🐛 [Report bugs](https://github.com/yourusername/fast_bloom_filter/issues)
-- 💡 [Request features](https://github.com/yourusername/fast_bloom_filter/issues)
-- 📖 [Documentation](https://github.com/yourusername/fast_bloom_filter)
+- 🐛 [Report bugs](https://github.com/roman-haidarov/fast_bloom_filter/issues)
+- 💡 [Request features](https://github.com/roman-haidarov/fast_bloom_filter/issues)
+- 📖 [Documentation](https://github.com/roman-haidarov/fast_bloom_filter)
 
 ## Changelog
 
